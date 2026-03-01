@@ -18,7 +18,7 @@ env:
   PIP_ZOOM: 18
   RENDER_MIN_ZOOM: 4
   RENDER_MAX_ZOOM: 14
-  AZURE_BASE: "https://overturemapswestus2.blob.core.windows.net/release"
+  S3_BASE: "s3://overturemaps-us-west-2/release"
 
 jobs:
   build:
@@ -65,7 +65,7 @@ jobs:
           OVERTURE_RELEASE: ${{ steps.release.outputs.version }}
         run: |
           echo "Using Overture release: $OVERTURE_RELEASE"
-          PARQUET_PATH="${AZURE_BASE}/${OVERTURE_RELEASE}/theme=divisions/type=division_area/*"
+          PARQUET_PATH="${S3_BASE}/${OVERTURE_RELEASE}/theme=divisions/type=division_area/*"
 
           SUBTYPES=("locality" "county" "region" "country")
           for SUBTYPE in "${SUBTYPES[@]}"; do
@@ -75,6 +75,7 @@ jobs:
               INSTALL httpfs;
               LOAD spatial;
               LOAD httpfs;
+              SET s3_region = 'us-west-2';
 
               COPY (
                   SELECT
@@ -96,11 +97,12 @@ jobs:
         env:
           OVERTURE_RELEASE: ${{ steps.release.outputs.version }}
         run: |
-          DIVISION_PATH="${AZURE_BASE}/${OVERTURE_RELEASE}/theme=divisions/type=division/*"
+          DIVISION_PATH="${S3_BASE}/${OVERTURE_RELEASE}/theme=divisions/type=division/*"
 
           duckdb -c "
             INSTALL httpfs;
             LOAD httpfs;
+            SET s3_region = 'us-west-2';
 
             WITH divisions AS (
                 SELECT
