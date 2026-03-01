@@ -18,7 +18,7 @@ env:
   PIP_ZOOM: 18
   RENDER_MIN_ZOOM: 4
   RENDER_MAX_ZOOM: 14
-  AZURE_BASE: "https://overturemapswestus2.dfs.core.windows.net/release"
+  AZURE_BASE: "https://overturemapswestus2.blob.core.windows.net/release"
 
 jobs:
   build:
