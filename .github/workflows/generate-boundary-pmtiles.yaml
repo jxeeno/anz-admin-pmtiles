@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  PIP_ZOOM: 18
+  PIP_ZOOM: 15
   RENDER_MIN_ZOOM: 4
   RENDER_MAX_ZOOM: 14
   S3_BASE: "s3://overturemaps-us-west-2/release"
