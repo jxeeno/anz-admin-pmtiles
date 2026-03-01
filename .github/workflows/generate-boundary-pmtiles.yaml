@@ -18,6 +18,7 @@ env:
   PIP_ZOOM: 18
   RENDER_MIN_ZOOM: 4
   RENDER_MAX_ZOOM: 14
+  AZURE_BASE: "https://overturemapswestus2.dfs.core.windows.net/release"
 
 jobs:
   build:
@@ -59,11 +60,12 @@ jobs:
           make -j$(nproc)
           sudo make install
 
-      - name: Extract divisions from Overture Maps
+      - name: Extract division areas (GeoJSON for PMTiles)
         env:
           OVERTURE_RELEASE: ${{ steps.release.outputs.version }}
         run: |
           echo "Using Overture release: $OVERTURE_RELEASE"
+          PARQUET_PATH="${AZURE_BASE}/${OVERTURE_RELEASE}/theme=divisions/type=division_area/*"
 
           SUBTYPES=("locality" "county" "region" "country")
           for SUBTYPE in "${SUBTYPES[@]}"; do
@@ -73,7 +75,6 @@ jobs:
               INSTALL httpfs;
               LOAD spatial;
               LOAD httpfs;
-              SET s3_region = 'us-west-2';
 
               COPY (
                   SELECT
@@ -82,9 +83,7 @@ jobs:
                       subtype,
                       admin_level,
                       geometry
-                  FROM read_parquet(
-                      's3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=divisions/type=division_area/*'
-                  )
+                  FROM read_parquet('${PARQUET_PATH}')
                   WHERE country IN ('AU', 'NZ')
                     AND subtype = '${SUBTYPE}'
               ) TO '${SUBTYPE}.geojson'
@@ -93,30 +92,51 @@ jobs:
             echo "${SUBTYPE} features: $(grep -c '"Feature"' ${SUBTYPE}.geojson || echo '0')"
           done
 
-      - name: Export CSV (without geometry)
+      - name: Export CSV with parent hierarchy
         env:
           OVERTURE_RELEASE: ${{ steps.release.outputs.version }}
         run: |
-          duckdb -c "
-            INSTALL spatial;
-            INSTALL httpfs;
-            LOAD spatial;
-            LOAD httpfs;
-            SET s3_region = 'us-west-2';
+          DIVISION_PATH="${AZURE_BASE}/${OVERTURE_RELEASE}/theme=divisions/type=division/*"
 
-            COPY (
+          duckdb -c "
+            INSTALL httpfs;
+            LOAD httpfs;
+
+            WITH divisions AS (
                 SELECT
                     id,
                     names.primary AS name,
                     country,
+                    region,
                     subtype,
-                    admin_level
-                FROM read_parquet(
-                    's3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=divisions/type=division_area/*'
-                )
+                    admin_level,
+                    parent_division_id
+                FROM read_parquet('${DIVISION_PATH}')
                 WHERE country IN ('AU', 'NZ')
                   AND subtype IN ('locality', 'county', 'region', 'country')
-                ORDER BY country, subtype, name
+            ),
+            parents AS (
+                SELECT
+                    id,
+                    names.primary AS name,
+                    subtype
+                FROM read_parquet('${DIVISION_PATH}')
+                WHERE country IN ('AU', 'NZ')
+            )
+            COPY (
+                SELECT
+                    d.id,
+                    d.name,
+                    d.country,
+                    d.region,
+                    d.subtype,
+                    d.admin_level,
+                    d.parent_division_id,
+                    p.name AS parent_name,
+                    p.subtype AS parent_subtype
+                FROM divisions d
+                LEFT JOIN parents p ON d.parent_division_id = p.id
+                ORDER BY d.country, d.subtype, d.name
             ) TO 'boundaries.csv'
             WITH (HEADER, DELIMITER ',');
           "
@@ -174,19 +194,18 @@ jobs:
           body: |
             AU/NZ administrative boundaries from Overture Maps release `${{ steps.release.outputs.version }}`.
 
-            **boundaries-pip.pmtiles** — Point-in-polygon queries
+            **boundaries-pip.pmtiles** - Point-in-polygon queries
             - Single zoom level: ${{ env.PIP_ZOOM }}
             - No tile compression, no simplification
             - Optimised for spatial lookup accuracy (~0.5m)
 
-            **boundaries-render.pmtiles** — Map rendering
+            **boundaries-render.pmtiles** - Map rendering
             - Zoom levels: ${{ env.RENDER_MIN_ZOOM }}–${{ env.RENDER_MAX_ZOOM }}
             - Standard simplification for smaller file size
             - Optimised for visual display
 
-            **boundaries.csv** — Flat lookup table
-            - All divisions without geometry
-            - Columns: id, name, country, subtype, admin_level
+            **boundaries.csv** - Flat lookup table with parent hierarchy
+            - Columns: id, name, country, region, subtype, admin_level, parent_division_id, parent_name, parent_subtype
 
             **Layers:** locality, county, region, country
             **Source:** Overture Maps divisions theme
